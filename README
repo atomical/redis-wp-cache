@@ -1,1 +1,14 @@
+=== redis-wp-cache ===
+Contributors: atomical
+Tags: cache, object cache, redis, predis, memcache
+License: GPLv2
 
+== Description ==
+
+redis-wp-cache saves the Wordpress's object cache in memory using redis which results in faster page load times
+
+== Installation ==
+
+Open the object-cache.php file and change the server settings to match your Redis configuration.  Copy object-cache.php and the predis directory to the wp-content directory.  
+
+== Changelog ==

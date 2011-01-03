@@ -6,7 +6,6 @@ define(__REDIS_OBJECT_CACHE_INSTALLED, True);
 function wp_cache_init() {
 	global $wp_object_cache;
     $wp_object_cache = new WP_Object_Cache();
-    $wp_object_cache->flushdb();
 }
 
 function wp_cache_add($key,$data,$group='default',$expire=0){
@@ -53,83 +52,70 @@ class WP_Object_Cache {
     var $global_groups = array ('users', 'userlogins', 'usermeta', 'site-options', 'site-lookup', 'blog-lookup', 'blog-details', 'rss');
 	var $no_redis_groups = array( 'comment', 'counts' );
     var $tmp_cache = array();
-    var $redis;
-    var $redis_servers = 
-    array(
-    'host'     => '127.0.0.1', 
-    'port'     => 6379, 
-    'database' => 1,
-    );  
     var $debug = false;
+    var $blog_id;
+    var $redis;
+    var $redis_servers = array('host'     => '127.0.0.1', 
+                               'port'     => 6379, 
+                               'database' => 1,
+                              );  
     
     function WP_Object_Cache(){
-
-        //initiate memcache connection
-        try {
-            $this->redis = new Predis_Client($this->redis_servers);
-        } catch(Predis_CommunicationException $e){}
+        global $blog_id;
+        $this->blog_id = $blog_id;    
+        $this->redis = new redis_wp_cache();
+        $this->redis->connect($this->redis_servers);
     }
     
     
     function key($key, $group) {	
-		global $blog_id;
-
 		if ( empty($group) )
 			$group = 'default';
-
 		if (false !== array_search($group, $this->global_groups))
 			$prefix = '';
 		else
-			$prefix = $blog_id . ':';
-
+			$prefix = $this->blog_id . ':';
 		return preg_replace('/\s+/', '', "$prefix$group:$key");
 	}
     
-    function set($key, $data, $group = 'default', $expire = 0){
+    function set($key, $data, $group = 'default', $ttl = 0){
         $key = $this->key($key,$group);
         if ( isset($this->tmp_cache[$key]) ) 
             return false;
         if ( in_array($group, $this->no_redis_groups) ) 
             return true;
-        if ( $expir > 0 )
-            $this->redis->setex($key, $expire, $this->perform_serialization($data));
-        else
-            $this->redis->set($key, $this->perform_serialization($data));
+        if ( $this->is_seriable($data) ) {
+            $this->redis->set($key, $this->perform_serialization($data), $ttl);
+        } else { 
+            $this->redis->set($key, $data, $ttl);
+        }
         $this->tmp_cache[$key] = $data;
-        $this->_debug("set key:$key");
         return true;
-        
-       
     }
     
 
     function get($key, $group='default', $expire = 0){
-        $key = $this->key($key,$group);
-        if ( isset($this->tmp_cache[$key]) ) {
-            return $this->tmp_cache[$key];    
-            $this->_debug('fetched from local cache');   
-        }
-        $this->_debug("get key:$key");
-        $get = $this->redis->get($key);
-        $tmp = unserialize($get);
-        if ( $tmp )
-            return $tmp;
+       $key = $this->key($key,$group);
+       if ( isset($this->tmp_cache[$key]) ) {
+            return $this->tmp_cache[$key]; 
+       }
+       $get = $this->redis->get($key);
+       $tmp = unserialize($get);
+       if ( $tmp )
+          return $tmp;
        return $get;
     }
- 
-    function flushdb(){        
-        $this->_debug("flushdb");
-        $this->redis->flushdb();
-    }
     
+    function is_seriable($var){
+        if ( is_array($var) )
+            return true;
+        else if ( is_object($var) )
+            return true;
+        else
+            return false;
+    }
     function perform_serialization($var){
-        if ( is_object($var)) {
-            return serialize($var);
-        } elseif (is_array($var)) { 
-            return serialize($var);
-        } else {
-            return $var;
-        }
+        return serialize($var);
     }
     
     function _debug($msg){
@@ -146,6 +132,40 @@ class WP_Object_Cache {
             fwrite($fp, $msg . "\n");
             fclose($fp);
         }
+    }
+    
+}
+
+
+class redis_wp_cache { 
+    
+    var $redis;
+    
+    function connect($server){
+        try {
+            $this->redis = @ new Predis_Client($server);
+        } catch(Predis_CommunicationException $e){}
+    }
+
+    function close(){
+        $this->redis->disconnect();
+    }
+    
+    function get($key){
+        $this->redis->get($key);
+    }
+    
+    function set($key,$data, $ttl = 0 ){
+        
+        if ( $ttl == 0 )
+            $this->redis->set($key,$data);
+        else
+            $this->redis->setex($key,$ttl, $data);
+    
+    }
+    
+    function flushdb(){
+        $this->redis->flushdb();
     }
     
 }
